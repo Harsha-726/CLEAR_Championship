@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CLEAR Championship</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏆</text></svg>">
+<title>Camp Showdown — Scoreboard</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7wn4+GPC90ZXh0Pjwvc3ZnPg==">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
@@ -391,7 +391,7 @@
 <div class="wrap">
   <header>
     <div class="eyebrow"><span class="dot"></span>LIVE SCOREBOARD</div>
-    <h1 class="title">CLEAR Championship<span>.</span></h1>
+    <h1 class="title">Camp Showdown<span>.</span></h1>
     <nav id="nav"></nav>
   </header>
 
@@ -441,8 +441,37 @@
 </div>
 
 <script>
+/* ============ CONFIG — fill these in ============
+   1. Go to https://jsonbin.io and create a free account.
+   2. Create a new bin. Paste this as its starting content:
+        {"achievements":[]}
+   3. Copy the Bin ID (in the URL after creating it) into BIN_ID below.
+   4. Go to Account > API Keys, copy your "Master Key" into BIN_KEY below.
+   5. Set EDIT_PASSWORD to whatever password you want to require before
+      anyone can log points or delete a card.
+   Note: this key lives in the page source, so it's a soft deterrent
+   (fine for a classroom), not bank-vault security.
+================================================== */
+const BIN_ID = '6a46b277f5f4af5e2955b46f';
+const BIN_KEY = '$2a$10$iv2M/2uU5AUOs6QizgYro.Euj.tRXjMix.FyPVftVI5rwwakh4IRu';
+const EDIT_PASSWORD = 'CLEARKey88914000';
+const REFRESH_MS = 15000; // how often viewers auto-refresh to see new points
+
+let isUnlocked = false;
+
+async function requireUnlock(){
+  if(isUnlocked) return true;
+  const attempt = prompt('Enter the password to edit the scoreboard:');
+  if(attempt === EDIT_PASSWORD){
+    isUnlocked = true;
+    return true;
+  }
+  if(attempt !== null) alert('Wrong password.');
+  return false;
+}
+
 const TEAMS = [
-  { id:'violet',  name:'Violet Auroras', color:'#8B5CF6', dim:'#8B5CF62A', members:['Lahari','Ammu','Aadvika','Aadhya'] },
+  { id:'violet',  name:'Violet Aroras', color:'#8B5CF6', dim:'#8B5CF62A', members:['Lahari','Ammu','Aadvika','Aadhya'] },
   { id:'lebron',  name:'Lebron',        color:'#F2A93B', dim:'#F2A93B2A', members:['Aarav','Ishaan','Sid D'] },
   { id:'ronaldo', name:'Ronaldo',       color:'#E5484D', dim:'#E5484D2A', members:['Sid G','Vinny','Advay'] },
 ];
@@ -450,7 +479,7 @@ const TEAMS = [
 const DEFAULT_ACHIEVEMENTS = [
   { id:1, team:'violet',  points:20, why:'Answered Review Question',            date:'06/30' },
   { id:2, team:'violet',  points:60, why:'Found Hidden Easter Egg',             date:'06/30' },
-  { id:3, team:'violet',  points:20, why:'Answered: "What Color Was The Word On The Board?"', date:'06/30' },
+  { id:3, team:'violet',  points:20, why:'Answered Hidden Easter Egg Question', date:'06/30' },
   { id:4, team:'lebron',  points:20, why:'Participated In Group Activity',      date:'06/30' },
   { id:5, team:'ronaldo', points:20, why:'Participated In Group Activity',      date:'06/30' },
 ];
@@ -479,19 +508,33 @@ function totalFor(teamId){
 
 async function loadData(){
   try{
-    const res = await window.storage.get('achievements', false);
-    achievements = res ? JSON.parse(res.value) : DEFAULT_ACHIEVEMENTS;
-    if(!res) await window.storage.set('achievements', JSON.stringify(DEFAULT_ACHIEVEMENTS), false);
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: { 'X-Master-Key': BIN_KEY }
+    });
+    if(!res.ok) throw new Error('fetch failed');
+    const data = await res.json();
+    const list = data.record && data.record.achievements;
+    achievements = (list && list.length) ? list : DEFAULT_ACHIEVEMENTS;
+    if(!list || !list.length) await persist(); // seed the bin on first run
   }catch(e){
+    console.error('load failed, showing local defaults', e);
     achievements = DEFAULT_ACHIEVEMENTS;
-    try{ await window.storage.set('achievements', JSON.stringify(DEFAULT_ACHIEVEMENTS), false); }catch(e2){}
   }
   renderAll();
 }
 
 async function persist(){
-  try{ await window.storage.set('achievements', JSON.stringify(achievements), false); }
-  catch(e){ console.error('save failed', e); }
+  try{
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': BIN_KEY },
+      body: JSON.stringify({ achievements })
+    });
+    if(!res.ok) throw new Error('save failed');
+  }catch(e){
+    console.error('save failed', e);
+    alert("Couldn't save to the shared scoreboard — check your internet connection and try again.");
+  }
 }
 
 function buildNav(){
@@ -597,9 +640,10 @@ function renderAll(){
   renderTeamPages();
 }
 
-function deleteAchievement(id){
+async function deleteAchievement(id){
+  if(!(await requireUnlock())) return;
   achievements = achievements.filter(a => a.id !== id);
-  persist();
+  await persist();
   renderAll();
 }
 
@@ -625,7 +669,9 @@ function openModal(){
 }
 function closeModal(){ document.getElementById('modalBackdrop').classList.remove('active'); }
 
-document.getElementById('openAdd').onclick = openModal;
+document.getElementById('openAdd').onclick = async () => {
+  if(await requireUnlock()) openModal();
+};
 document.getElementById('cancelAdd').onclick = closeModal;
 document.getElementById('modalBackdrop').onclick = (e) => { if(e.target.id === 'modalBackdrop') closeModal(); };
 
@@ -642,6 +688,7 @@ document.getElementById('saveAdd').onclick = async () => {
 };
 
 loadData();
+setInterval(loadData, REFRESH_MS);
 </script>
 </body>
 </html>
